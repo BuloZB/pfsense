@@ -260,6 +260,9 @@ define('LOG_AUTH_EVENT_LOGOUT', 2);
 define('LOG_AUTH_EVENT_ERROR', 3);
 define('LOG_AUTH_EVENT_TIMEOUT', 4);
 
+// POSIX constants
+define('POSIX_EPERM', 1);
+
 /**
  * Get a list of valid rule label tags.
  *
@@ -657,18 +660,32 @@ function killbypid($pidfile, $waitfor = 0) {
 	return sigkillbypid($pidfile, "TERM", $waitfor);
 }
 
-function isvalidpid(string $pidfile): bool {
-	if (! @file_exists($pidfile)) {
+function isvalidpid(string $pidfile): bool
+{
+	if (!is_file($pidfile) || !is_readable($pidfile)) {
 		return false;
 	}
-	exec(implode(' ', [
-		'/bin/pkill',
-		'-0',
-		'-F', escapeshellarg($pidfile),
-		'2>/dev/null'
-	]), $_out, $ret);
 
-	return ($ret === 0);
+	$contents = file_get_contents($pidfile);
+	if ($contents === false) {
+		return false;
+	}
+
+	// Must be a positive integer
+	$pid = filter_var(trim($contents), FILTER_VALIDATE_INT, [
+		'options' => ['min_range' => 1],
+	]);
+	if ($pid === false) {
+		return false;
+	}
+
+	// Signal 0 probes process existence without actually signalling.
+	if (posix_kill($pid, 0)) {
+		return true;
+	}
+
+	// EPERM means the process exists but we lack permission to signal it.
+	return (posix_get_last_error() === POSIX_EPERM);
 }
 
 function is_process_running(string $name): bool {
